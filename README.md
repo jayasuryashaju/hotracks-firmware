@@ -89,13 +89,16 @@ To cut a release:
      0x8000  partitions.bin \
      0x10000 hotracks_esp32.ino.bin
    ```
-2. Create a GitHub Release on the `hotracks-firmware` repo (tag it, e.g. `v1.0.1`) and
-   attach that file **named exactly `hotracks_esp32.merged.bin`** — `docs/manifest.json`
-   points at `.../releases/latest/download/hotracks_esp32.merged.bin`, which always
-   resolves to the newest release's asset with that name, so the install page never
-   needs editing between releases.
-3. Enable GitHub Pages on the repo, serving from the `main` branch's `/docs` folder.
-   The install page is then live at `https://<username>.github.io/hotracks-firmware/`.
+2. Copy that file to `docs/firmware/hotracks_esp32.merged.bin`, overwriting the
+   previous one, and bump the `version` field in `docs/manifest.json`.
+3. Commit and push. GitHub Pages (serving `main`'s `/docs` folder — the install page
+   is live at `https://<username>.github.io/hotracks-firmware/`) redeploys the new
+   binary automatically.
+
+The binary is served from the same origin as the install page on purpose — GitHub
+Release assets don't send `Access-Control-Allow-Origin`, so the browser's
+cross-origin fetch for the binary fails with "Failed to fetch" if you point the
+manifest at a Release download URL instead.
 
 ## API contract
 
