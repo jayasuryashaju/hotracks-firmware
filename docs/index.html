@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HotRacks Firmware Installer</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body {
+    background: #030712;
+    color: #f8fafc;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 1.5rem;
+  }
+  .card {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 1rem;
+    width: 100%;
+    max-width: 520px;
+    padding: 2.5rem;
+    box-shadow: 0 25px 50px -12px rgba(6, 182, 212, 0.15);
+  }
+  .badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    background: rgba(6, 182, 212, 0.15);
+    color: #22d3ee;
+    border: 1px solid rgba(6, 182, 212, 0.4);
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 1rem;
+  }
+  h1 {
+    font-size: 1.75rem;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    margin-bottom: 0.5rem;
+  }
+  p {
+    color: #94a3b8;
+    font-size: 0.9rem;
+    line-height: 1.55;
+    margin-bottom: 1rem;
+  }
+  ol {
+    color: #94a3b8;
+    font-size: 0.85rem;
+    line-height: 1.7;
+    margin: 0 0 1.75rem 1.25rem;
+  }
+  ol li strong { color: #cbd5e1; }
+  button {
+    width: 100%;
+    background: linear-gradient(135deg, #06b6d4, #14b8a6);
+    border: none;
+    border-radius: 0.6rem;
+    padding: 0.9rem;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #020617;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  button:hover { opacity: 0.95; }
+  .unsupported, .not-allowed {
+    display: block;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+    border-radius: 0.6rem;
+    padding: 0.85rem;
+    font-size: 0.8rem;
+    line-height: 1.5;
+  }
+  .footer {
+    margin-top: 1.75rem;
+    text-align: center;
+    font-size: 0.75rem;
+    color: #64748b;
+  }
+  .footer a { color: #22d3ee; text-decoration: none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <span class="badge">HotRacks Hardware</span>
+    <h1>Install Rack Controller Firmware</h1>
+    <p>
+      Flashes the HotRacks controller firmware straight from your browser onto an
+      ESP32-C3 (Super Mini) board over USB — no Arduino IDE, no drivers beyond the
+      board's own USB-serial chip.
+    </p>
+    <ol>
+      <li><strong>Browser:</strong> use Chrome or Edge on a desktop/laptop (Web Serial isn't supported on mobile or Firefox/Safari).</li>
+      <li><strong>Wiring:</strong> have your WS2812B strip's data line on the configured GPIO pin, common ground with the board, and a separate 5V supply for the strip.</li>
+      <li>Plug the ESP32-C3 in over USB, click install below, and pick its serial port when your browser prompts you.</li>
+      <li>After it reboots, connect to its <code>HotRacks-Setup</code> Wi-Fi network to finish provisioning (see the main firmware README).</li>
+    </ol>
+
+    <esp-web-install-button manifest="manifest.json">
+      <button slot="activate">Connect &amp; Install Firmware</button>
+      <span slot="unsupported" class="unsupported">
+        Your browser doesn't support Web Serial. Open this page in Chrome or Edge on a
+        desktop computer instead.
+      </span>
+      <span slot="not-allowed" class="not-allowed">
+        This page needs to be served over HTTPS (or localhost) to flash a device —
+        you're seeing this because it isn't right now.
+      </span>
+    </esp-web-install-button>
+
+    <p class="footer">
+      Firmware source: <a href="https://github.com/jayasuryashaju/hotracks-firmware">github.com/jayasuryashaju/hotracks-firmware</a>
+    </p>
+  </div>
+</body>
+</html>

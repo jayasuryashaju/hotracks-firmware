@@ -1,0 +1,16 @@
+{
+  "name": "HotRacks Controller Firmware",
+  "version": "1.0.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-C3",
+      "parts": [
+        {
+          "path": "https://github.com/jayasuryashaju/hotracks-firmware/releases/latest/download/hotracks_esp32.merged.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}
