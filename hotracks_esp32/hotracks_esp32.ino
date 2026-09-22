@@ -823,6 +823,15 @@ void setup() {
   });
 
   ElegantOTA.begin(&server); // no auth — only reachable from inside the trusted LAN anyway
+  // OTA only replaces the app partition, not NVS — without this, a fresh firmware
+  // build would silently keep reconnecting with whatever Wi-Fi was saved before,
+  // instead of coming back up for you to reprovision it.
+  ElegantOTA.onEnd([](bool success) {
+    if (success) {
+      preferences.remove("ssid");
+      preferences.remove("pass");
+    }
+  });
 
   server.begin();
   Serial.println("HotRacks HTTP Controller API online on port 80.");

@@ -69,6 +69,11 @@ After the first USB flash, every later firmware update can be pushed over Wi-Fi:
 
 No cable needed again unless the board stops booting or loses Wi-Fi entirely.
 
+A successful OTA update clears the saved Wi-Fi credentials, so the board comes back
+up in `HotRacks-Setup` captive-portal mode instead of silently reconnecting to
+whatever network it had before — reprovision it the same way as a first-time flash.
+Device ID, LED count, hex slot map, and current LED state/effect are untouched.
+
 ## Distributing precompiled firmware (no Arduino IDE needed)
 
 The `docs/` folder is a self-contained browser flashing tool (like WLED's
