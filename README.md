@@ -67,12 +67,9 @@ After the first USB flash, every later firmware update can be pushed over Wi-Fi:
 3. Upload the new `.bin` from the Arduino build output (or Sketch → Export Compiled Binary's
    output folder) through the page.
 
-No cable needed again unless the board stops booting or loses Wi-Fi entirely.
-
-A successful OTA update clears the saved Wi-Fi credentials, so the board comes back
-up in `HotRacks-Setup` captive-portal mode instead of silently reconnecting to
-whatever network it had before — reprovision it the same way as a first-time flash.
-Device ID, LED count, hex slot map, and current LED state/effect are untouched.
+No cable needed again unless the board stops booting or loses Wi-Fi entirely. OTA
+only replaces the app partition, so Wi-Fi credentials, device ID, LED count, hex
+slot map, and current LED state/effect all survive an update untouched.
 
 ## Distributing precompiled firmware (no Arduino IDE needed)
 
@@ -81,29 +78,41 @@ install.wled.me) built on [ESP Web Tools](https://esphome.github.io/esp-web-tool
 a person can plug in a blank ESP32-C3 and flash it from Chrome/Edge alone, no Arduino
 IDE or drivers beyond the board's USB-serial chip.
 
+The installer flashes four pieces at their **real, separate flash offsets** —
+bootloader, partition table, the stock `boot_app0.bin` OTA-slot selector, and the
+app — instead of one monolithic merged image. This matters: a merged image spans
+the *entire* flash chip start-to-end, which necessarily overwrites the NVS
+partition's address range (where Wi-Fi credentials, device ID, LED count, etc. all
+live) with blank filler, wiping it on every reinstall. Flashing the four pieces
+separately only ever touches the bootloader/partition-table/app regions, leaving
+the gap where NVS sits completely untouched — so reinstalling firmware through the
+browser preserves everything, the same way a normal OTA update does.
+
 To cut a release:
 
 1. In Arduino IDE, with board = **ESP32C3 Dev Module**: **Sketch → Export Compiled
-   Binary**. Look in the sketch's `build/<fqbn>/` folder for a **merged** binary
-   (bootloader + partition table + app combined at their real flash offsets, often
-   named `hotracks_esp32.ino.merged.bin`; recent esp32 core versions produce this
-   automatically). If your core version doesn't produce one, merge them yourself:
-   ```bash
-   esptool.py --chip esp32c3 merge_bin -o hotracks_esp32.merged.bin \
-     0x0     bootloader.bin \
-     0x8000  partitions.bin \
-     0x10000 hotracks_esp32.ino.bin
-   ```
-2. Copy that file to `docs/firmware/hotracks_esp32.merged.bin`, overwriting the
-   previous one, and bump the `version` field in `docs/manifest.json`.
+   Binary**. In the sketch's `build/<fqbn>/` output folder you'll find (alongside a
+   merged binary, which this project does **not** use — see above):
+   - `<sketch>.ino.bootloader.bin`
+   - `<sketch>.ino.partitions.bin`
+   - `<sketch>.ino.bin` (the app)
+   - `boot_app0.bin` — not sketch-specific, copy it once from
+     `<esp32-core-install-dir>/tools/partitions/boot_app0.bin` (only needs
+     re-copying if you ever change core version).
+2. Copy the three sketch-specific files into `docs/firmware/`, overwriting the
+   previous ones, and bump the `version` field in `docs/manifest.json`. The offsets
+   in `manifest.json` (`0x0`, `0x8000`, `0xe000`, `0x10000`) must match your board's
+   actual layout — check `boards.txt`'s `<board>.build.bootloader_addr` if you ever
+   switch to a different ESP32 variant, since classic ESP32 (non-C3/S3) uses
+   `0x1000` for the bootloader instead of `0x0`.
 3. Commit and push. GitHub Pages (serving `main`'s `/docs` folder — the install page
    is live at `https://<username>.github.io/hotracks-firmware/`) redeploys the new
-   binary automatically.
+   binaries automatically.
 
-The binary is served from the same origin as the install page on purpose — GitHub
+Binaries are served from the same origin as the install page on purpose — GitHub
 Release assets don't send `Access-Control-Allow-Origin`, so the browser's
-cross-origin fetch for the binary fails with "Failed to fetch" if you point the
-manifest at a Release download URL instead.
+cross-origin fetch for them fails with "Failed to fetch" if you point the manifest
+at a Release download URL instead.
 
 ## API contract
 
