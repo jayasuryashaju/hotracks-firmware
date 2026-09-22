@@ -23,6 +23,5 @@
 
 // ---- OTA Updates ----
 // After the first USB flash, browse to http://<device_id>.local/update to push
-// future firmware builds from the browser — no cable needed again.
-#define OTA_USERNAME "admin"
-#define OTA_PASSWORD "hotracks-ota" // change this — anyone on your LAN who has it can flash new firmware
+// future firmware builds from the browser — no cable needed again. No login: this
+// is only reachable from inside your LAN, same trust model as the rest of the API.

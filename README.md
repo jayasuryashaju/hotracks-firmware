@@ -62,9 +62,9 @@ After the first USB flash, every later firmware update can be pushed over Wi-Fi:
 
 1. In Arduino IDE, Sketch → Export Compiled Binary (or just keep building normally).
 2. Browse to `http://<device_id lowercased>.local/update` (e.g. `http://rack-01.local/update`).
-3. Log in with the `OTA_USERNAME`/`OTA_PASSWORD` set in `config.h` (defaults to `admin` /
-   `hotracks-ota` — change the password before leaving this on a shared network).
-4. Upload the new `.bin` from the Arduino build output (or Sketch → Export Compiled Binary's
+   No login — anyone on your LAN can push an update, same trust model as every other
+   endpoint on this device.
+3. Upload the new `.bin` from the Arduino build output (or Sketch → Export Compiled Binary's
    output folder) through the page.
 
 No cable needed again unless the board stops booting or loses Wi-Fi entirely.
@@ -106,12 +106,14 @@ To cut a release:
 | POST   | `/led`     | `{index, r, g, b}`                                 | Sets one LED immediately, cancels any effect running on it. `index` must be `< led_count`. |
 | POST   | `/leds`    | `{pixels: [{index, r, g, b}, ...]}`                | Sets many LEDs in a single request/single strip refresh. Prefer this over N `/led` calls for a multi-LED hex — separate concurrent requests can be applied out of order and each one forces its own refresh, which is what caused the "lights up one-by-one" / partial on-off behavior. |
 | POST   | `/off`     | —                                                   | Clears every LED and any running effect  |
-| POST   | `/effect`  | `{name, color?, speed?, index?, count?}`           | `name`: `solid`/`breathe`/`rainbow`/`chase`/`sparkle`/`flame`/`aurora`/`scanner`/`strobe`/`off`. Omit `index` to target the whole strip; when targeting one hex, pass `count` (its `led_count`) so the whole hex animates, not just its first LED. |
+| POST   | `/effect`  | `{name, color?, palette?, speed?, index?, count?, bySlot?}` | `name`: `solid`/`breathe`/`rainbow`/`chase`/`sparkle`/`flame`/`aurora`/`scanner`/`strobe`/`off`. Omit `index` to target the whole strip; when targeting one hex, pass `count` (its `led_count`) so the whole hex animates, not just its first LED. `palette`: `default`/`rainbow`/`party`/`cloud`/`lava`/`ocean`/`forest`/`fire`/`sunset`/`cyberpunk` — a real multi-color FastLED gradient the effect cycles through, like a WLED palette. Omit it (or send `color` instead) for a single flat color. `bySlot` (default `true`): step per hex slot instead of per raw LED, so a multi-LED hex moves as one unit through chase/scanner/etc.; requires the slot map below to have been pushed at least once. |
+| POST   | `/slots`   | `{slots: [{index, count}, ...]}`                   | Pushes the physical hex layout (one entry per hex, in physical order) so slot-based effects know where each hex's LEDs are. The app calls this whenever the device's hex cells change. |
 
 State (whole-strip effect, or the static per-hex colors when no effect is running) is
 persisted to flash a couple seconds after the last change, and restored on boot — a
 power cycle resumes the same look instead of coming back dark. Per-hex effects applied
-only to a "lit" subset aren't captured by this and won't survive a power cycle.
+only to a "lit" subset aren't captured by this and won't survive a power cycle. The
+slot map is also persisted, independently of LED state.
 Wi-Fi reconnects automatically if the connection drops mid-session (checked every 5s);
 a full captive-portal re-provision is only needed if the saved credentials themselves
 stop working.
@@ -126,7 +128,8 @@ curl http://rack-01.local/status
 curl -X POST http://rack-01.local/config -d '{"num_leds":48}'
 curl -X POST http://rack-01.local/led -d '{"index":0,"r":255,"g":80,"b":0}'
 curl -X POST http://rack-01.local/leds -d '{"pixels":[{"index":0,"r":255,"g":80,"b":0},{"index":1,"r":255,"g":80,"b":0}]}'
-curl -X POST http://rack-01.local/effect -d '{"name":"rainbow","speed":60}'
+curl -X POST http://rack-01.local/effect -d '{"name":"chase","palette":"fire","speed":60}'
+curl -X POST http://rack-01.local/slots -d '{"slots":[{"index":0,"count":5},{"index":5,"count":5}]}'
 curl -X POST http://rack-01.local/off
 ```
 

@@ -55,6 +55,7 @@ struct GlobalEffect {
   EffectType type = EFFECT_NONE;
   CRGB color = CRGB::White;
   uint8_t speed = 50; // 1-100
+  bool bySlot = true; // step per hex slot instead of per raw LED (see "Slot Map" below)
 } globalEffect;
 
 struct PixelEffect {
@@ -63,6 +64,50 @@ struct PixelEffect {
   uint8_t speed = 50;
 };
 PixelEffect pixelEffects[MAX_LEDS];
+
+// ---- Color Palettes ----
+// Real multi-color gradients (like WLED's palettes), not just a single flat color.
+// Selected by the same palette ids used in the frontend (wledPalettes.ts).
+CRGBPalette16 activePalette = CRGBPalette16(CRGB::White);
+bool paletteActive = false; // false = "default"/no palette, use the flat color instead
+
+CRGBPalette16 paletteFromId(const String &id) {
+  if (id == "rainbow") return RainbowColors_p;
+  if (id == "party") return PartyColors_p;
+  if (id == "cloud") return CloudColors_p;
+  if (id == "lava") return LavaColors_p;
+  if (id == "ocean") return OceanColors_p;
+  if (id == "forest") return ForestColors_p;
+  if (id == "fire") return HeatColors_p;
+  if (id == "sunset") return CRGBPalette16(CRGB(255, 94, 0), CRGB(255, 0, 110), CRGB(131, 0, 255), CRGB(255, 94, 0));
+  if (id == "cyberpunk") return CRGBPalette16(CRGB(255, 0, 229), CRGB(0, 229, 255), CRGB(255, 0, 229), CRGB(0, 229, 255));
+  return CRGBPalette16(CRGB::White); // "default" and unknown ids
+}
+
+void setActivePalette(const String &id) {
+  paletteActive = id.length() > 0 && id != "default";
+  if (paletteActive) activePalette = paletteFromId(id);
+}
+
+// Samples the active palette at a point in time (or a fixed point for a static
+// fill), falling back to the plain color when no palette is selected.
+CRGB colorForPhase(CRGB fallback, uint32_t p) {
+  if (paletteActive) return ColorFromPalette(activePalette, uint8_t(p), 255, LINEARBLEND);
+  return fallback;
+}
+
+// ---- Slot Map ----
+// The physical hex layout (LED range per hex slot), pushed from the app via POST
+// /slots whenever hex cells change. Lets chase/scanner/etc. advance one hex at a
+// time instead of one raw LED at a time, so a multi-LED hex moves as a single unit
+// matching the rack's physical layout — like WLED segments, but per hex.
+#define MAX_SLOTS 128
+struct Slot {
+  uint16_t index;
+  uint16_t count;
+};
+Slot slots[MAX_SLOTS];
+int numSlots = 0;
 
 uint32_t animPhase = 0;
 uint32_t lastTick = 0;
@@ -118,6 +163,21 @@ void restoreStateFromNvs() {
   if (preferences.getBytesLength("pixels") == expected) {
     preferences.getBytes("pixels", leds, expected);
     requestShow();
+  }
+}
+
+void saveSlotsToNvs() {
+  preferences.putInt("num_slots", numSlots);
+  preferences.putBytes("slots", slots, numSlots * sizeof(Slot));
+}
+
+void restoreSlotsFromNvs() {
+  int saved = preferences.getInt("num_slots", 0);
+  if (saved > MAX_SLOTS) saved = MAX_SLOTS;
+  size_t expected = saved * sizeof(Slot);
+  if (saved > 0 && preferences.getBytesLength("slots") == expected) {
+    preferences.getBytes("slots", slots, expected);
+    numSlots = saved;
   }
 }
 
@@ -249,20 +309,23 @@ CRGB renderEffectAt(EffectType type, CRGB color, uint8_t speed, uint32_t phase) 
       return out;
     }
     case EFFECT_BREATHE: {
+      CRGB base = colorForPhase(color, p);
       uint8_t b = sin8(uint8_t(p));
-      return color.nscale8_video(b);
+      return base.nscale8_video(b);
     }
     case EFFECT_SPARKLE: {
-      return (random8() > 200) ? color : CRGB::Black;
+      CRGB base = colorForPhase(color, p);
+      return (random8() > 200) ? base : CRGB::Black;
     }
     case EFFECT_STROBE: {
-      return (p % 128 < 24) ? color : CRGB::Black;
+      CRGB base = colorForPhase(color, p);
+      return (p % 128 < 24) ? base : CRGB::Black;
     }
     case EFFECT_FLAME: {
+      CRGB base = colorForPhase(color, p);
       uint8_t heat = inoise8(uint16_t(p) * 3, millis() / 8);
-      CRGB out = color;
-      out.nscale8_video(heat);
-      return out;
+      base.nscale8_video(heat);
+      return base;
     }
     case EFFECT_AURORA: {
       uint8_t hueShift = inoise8(uint16_t(p), millis() / 20);
@@ -276,22 +339,42 @@ CRGB renderEffectAt(EffectType type, CRGB color, uint8_t speed, uint32_t phase) 
   }
 }
 
-void renderChaseToStrip(CRGB color, uint8_t speed, uint32_t phase) {
-  fadeToBlackBy(leds, activeNumLeds, 40);
-  uint16_t pos = (phase * (1 + speed / 8) / 4) % activeNumLeds;
-  for (uint16_t i = pos; i < activeNumLeds; i += 3) leds[i] = color;
+// Lights every LED of slot `s` to `c` (bounds-checked against the live buffer size).
+void paintSlot(int s, CRGB c) {
+  for (uint16_t i = 0; i < slots[s].count; i++) {
+    uint16_t led = slots[s].index + i;
+    if (led < activeNumLeds) leds[led] = c;
+  }
 }
 
-void renderScannerToStrip(CRGB color, uint8_t speed, uint32_t phase) {
-  fadeToBlackBy(leds, activeNumLeds, 60);
-  if (activeNumLeds < 2) {
-    if (activeNumLeds == 1) leds[0] = color;
+void renderChaseToStrip(CRGB color, uint8_t speed, uint32_t phase, bool bySlot) {
+  CRGB c = colorForPhase(color, phase);
+  fadeToBlackBy(leds, activeNumLeds, 40);
+  if (bySlot && numSlots > 0) {
+    uint16_t pos = (phase * (1 + speed / 8) / 4) % numSlots;
+    for (uint16_t s = pos; s < numSlots; s += 3) paintSlot(s, c);
     return;
   }
-  uint16_t span = (activeNumLeds - 1) * 2;
+  uint16_t pos = (phase * (1 + speed / 8) / 4) % activeNumLeds;
+  for (uint16_t i = pos; i < activeNumLeds; i += 3) leds[i] = c;
+}
+
+void renderScannerToStrip(CRGB color, uint8_t speed, uint32_t phase, bool bySlot) {
+  CRGB c = colorForPhase(color, phase);
+  fadeToBlackBy(leds, activeNumLeds, 60);
+  int units = (bySlot && numSlots > 0) ? numSlots : activeNumLeds;
+  if (units < 2) {
+    if (units == 1) {
+      if (bySlot && numSlots > 0) paintSlot(0, c);
+      else if (activeNumLeds == 1) leds[0] = c;
+    }
+    return;
+  }
+  uint16_t span = (units - 1) * 2;
   uint16_t pos = (phase * (1 + speed / 8) / 2) % span;
-  uint16_t i = (pos < activeNumLeds) ? pos : span - pos;
-  leds[i] = color;
+  uint16_t unit = (pos < units) ? pos : span - pos;
+  if (bySlot && numSlots > 0) paintSlot(unit, c);
+  else leds[unit] = c;
 }
 
 void tickAnimations() {
@@ -312,9 +395,16 @@ void tickAnimations() {
 
   if (globalEffect.type != EFFECT_NONE) {
     if (globalEffect.type == EFFECT_CHASE) {
-      renderChaseToStrip(globalEffect.color, globalEffect.speed, animPhase);
+      renderChaseToStrip(globalEffect.color, globalEffect.speed, animPhase, globalEffect.bySlot);
     } else if (globalEffect.type == EFFECT_SCANNER) {
-      renderScannerToStrip(globalEffect.color, globalEffect.speed, animPhase);
+      renderScannerToStrip(globalEffect.color, globalEffect.speed, animPhase, globalEffect.bySlot);
+    } else if (globalEffect.bySlot && numSlots > 0) {
+      // Every LED in a slot shares one color per frame — a 5-LED hex animates as
+      // one unit instead of each of its LEDs running the effect independently.
+      for (int s = 0; s < numSlots; s++) {
+        CRGB c = renderEffectAt(globalEffect.type, globalEffect.color, globalEffect.speed, animPhase + s * 3);
+        paintSlot(s, c);
+      }
     } else {
       for (int i = 0; i < activeNumLeds; i++) {
         leds[i] = renderEffectAt(globalEffect.type, globalEffect.color, globalEffect.speed, animPhase + i * 3);
@@ -442,6 +532,39 @@ void handleLedsBatchBody(AsyncWebServerRequest *request, uint8_t *data, size_t l
   sendJson(request, 200, res);
 }
 
+// Pushes the physical hex layout (LED range per hex) so slot-based effects know
+// where each hex's LEDs are. The app calls this whenever the device's hex cells
+// change (layout edits, leds_per_hex changes, reallocation).
+void handleSlotsBody(AsyncWebServerRequest *request, uint8_t *data, size_t len) {
+  JsonDocument doc;
+  if (deserializeJson(doc, data, len)) {
+    request->send(400, "application/json", "{\"error\":\"bad json\"}");
+    return;
+  }
+  JsonArray arr = doc["slots"].as<JsonArray>();
+  if (arr.isNull()) {
+    request->send(400, "application/json", "{\"error\":\"missing slots\"}");
+    return;
+  }
+
+  numSlots = 0;
+  for (JsonObject s : arr) {
+    if (numSlots >= MAX_SLOTS) break;
+    int idx = s["index"] | -1;
+    int cnt = s["count"] | 1;
+    if (idx < 0 || cnt < 1) continue;
+    slots[numSlots].index = idx;
+    slots[numSlots].count = cnt;
+    numSlots++;
+  }
+  saveSlotsToNvs();
+
+  JsonDocument res;
+  res["ok"] = true;
+  res["num_slots"] = numSlots;
+  sendJson(request, 200, res);
+}
+
 void handleEffectBody(AsyncWebServerRequest *request, uint8_t *data, size_t len) {
   JsonDocument doc;
   if (deserializeJson(doc, data, len)) {
@@ -453,6 +576,15 @@ void handleEffectBody(AsyncWebServerRequest *request, uint8_t *data, size_t len)
   const char *colorHex = doc["color"] | "#ffffff";
   long colorVal = strtol(colorHex + 1, nullptr, 16);
   CRGB color((colorVal >> 16) & 0xFF, (colorVal >> 8) & 0xFF, colorVal & 0xFF);
+  // Step per hex slot by default (matches the physical rack layout); the app can
+  // send bySlot:false to fall back to raw per-LED stepping instead.
+  bool bySlot = doc["bySlot"] | true;
+
+  if (doc["palette"].is<const char *>()) {
+    setActivePalette(String((const char *)doc["palette"]));
+  } else {
+    setActivePalette("");
+  }
 
   bool hasIndex = doc["index"].is<int>();
   EffectType type = parseEffectName(name);
@@ -466,11 +598,12 @@ void handleEffectBody(AsyncWebServerRequest *request, uint8_t *data, size_t len)
     // and the rest would sit at whatever they were previously.
     int count = doc["count"] | 1;
     if (count < 1) count = 1;
+    CRGB staticColor = colorForPhase(color, 128);
     for (int i = index; i < index + count; i++) {
       if (i < 0 || i >= activeNumLeds) continue;
       if (type == EFFECT_NONE) {
         pixelEffects[i] = PixelEffect();
-        leds[i] = color;
+        leds[i] = staticColor;
       } else {
         pixelEffects[i] = { type, color, speed };
       }
@@ -480,10 +613,10 @@ void handleEffectBody(AsyncWebServerRequest *request, uint8_t *data, size_t len)
   } else {
     if (type == EFFECT_NONE) {
       globalEffect.type = EFFECT_NONE;
-      fill_solid(leds, activeNumLeds, color);
+      fill_solid(leds, activeNumLeds, colorForPhase(color, 128));
       requestShow();
     } else {
-      globalEffect = { type, color, speed };
+      globalEffect = { type, color, speed, bySlot };
     }
     markStateDirty();
   }
@@ -601,6 +734,7 @@ void setup() {
   activeDeviceId = preferences.getString("dev_id", DEVICE_ID);
   applyActiveLedCount(preferences.getInt("num_leds", NUM_LEDS));
   restoreStateFromNvs();
+  restoreSlotsFromNvs();
 
   Serial.printf("HotRacks Controller Booting. Device ID: %s\n", activeDeviceId.c_str());
 
@@ -675,6 +809,12 @@ void setup() {
       [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t, size_t) {
         handleEffectBody(request, data, len);
       });
+  server.on(
+      "/slots", HTTP_POST, [](AsyncWebServerRequest *request) {},
+      nullptr,
+      [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t, size_t) {
+        handleSlotsBody(request, data, len);
+      });
   server.on("/off", HTTP_POST, [](AsyncWebServerRequest *request) {
     clearAll();
     JsonDocument res;
@@ -682,7 +822,7 @@ void setup() {
     sendJson(request, 200, res);
   });
 
-  ElegantOTA.begin(&server, OTA_USERNAME, OTA_PASSWORD);
+  ElegantOTA.begin(&server); // no auth — only reachable from inside the trusted LAN anyway
 
   server.begin();
   Serial.println("HotRacks HTTP Controller API online on port 80.");
